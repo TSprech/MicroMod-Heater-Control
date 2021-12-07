@@ -1,0 +1,8 @@
+namespace HeaterSettings;
+
+table HeaterSettings {
+  set_point:uint8;
+  lights:bool;
+}
+
+root_type HeaterSettings;
