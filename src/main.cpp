@@ -12,134 +12,157 @@
 // Seperator for Arduino header
 #include <Arduino.h>
 
+#include <Adafruit_GFX.h>
+#include <Adafruit_SH110X.h>
+
 #define SERIALOUT Serial
 
-const auto sd_cs_pin = SD_CS;  // D1 for single, G4 for double
+#include <menu.h>
+#include <menuIO/keyIn.h>
+#include <menuIO/chainStream.h>
+#include <menuIO/serialOut.h>
+#include <menuIO/adafruitGfxOut.h>
+#include <menuIO/serialIn.h>
 
-const uint32_t buffer_size = 1000;  // 200B buffer
-std::array<uint8_t, buffer_size> sd_buffer = {0};
+using namespace Menu;
 
-SdFat sd_card;
+#define LEDPIN LED_BUILTIN
 
-Adafruit_NeoPixel pixels = Adafruit_NeoPixel(4, F0_G7, NEO_GRB + NEO_KHZ800);
+Adafruit_SH1106G gfx(128, 64, COPI, SCLK, F0_G2, F0_G0, F0_G1);
 
-Adafruit_SH1106G oled = Adafruit_SH1106G(128, 64, COPI, SCLK, F0_G2, F0_G0, F0_G1);
+//Navigate buttons
+#define BTN_SEL     F0_G5                 // Select button
+#define BTN_UP      F0_G4                 // Up Button
+#define BTN_DOWN    F0_G3                 // Down Button
+#define BTN_ESC     F0_G6                 // Exit Button
 
-auto WriteHeaterSettings(flatbuffers::FlatBufferBuilder& builder) -> void {
-  auto buff_ptr = builder.GetBufferPointer();  // Get a pointer to access the Flatbuffer data
+#define TOTAL_NAV_BUTTONS 4       // Total Navigation Button used
 
-  ofstream output_data("HeaterSettings.bin");                        // Open or create a new file
-  if (output_data.is_open()) {                                       // Check that it is open
-    for (size_t offset = 0; offset < builder.GetSize(); ++offset) {  // Go through each byte of the builder's buffer that has relevent data
-      auto current_value = *(buff_ptr + offset);                     // Offset the point appropriately to access the next byte
-      output_data << current_value;                                  // Write the byte to the file
-    }
-  }
-  output_data.close();  // Finish writing
+keyMap joystickBtn_map[] = {
+  { -BTN_SEL, defaultNavCodes[enterCmd].ch} ,
+  { -BTN_UP, defaultNavCodes[upCmd].ch} ,
+  { -BTN_DOWN, defaultNavCodes[downCmd].ch}  ,
+  { -BTN_ESC, defaultNavCodes[escCmd].ch}  ,
+};
+keyIn<TOTAL_NAV_BUTTONS> keys(joystickBtn_map);//the input driver
+
+result showEvent(eventMask e,navNode& nav,prompt& item) {
+  Serial.print(F("event:"));
+  Serial.print(e);
+  return proceed;
 }
 
-auto WriteHeaterSettings(const uint8_t* buffer) -> void {
-  ofstream output_data("HeaterSettings.bin");  // Open or create a new file
-  if (output_data.is_open()) {                 // Check that it is open
-    // flatbuffers::GetPrefixedSize(buffer) + 30
-    for (size_t offset = 0; offset < 80; ++offset) {  // Go through each byte of the builder's buffer that has relevent data
-      auto current_value = *(buffer + offset);        // Offset the point appropriately to access the next byte
-      output_data << current_value;                   // Write the byte to the file
-    }
+int temperature=10;
+int ledCtrl=LOW;
+
+result alert(menuOut& o,idleEvent e);
+result doAlert(eventMask e, prompt &item);
+
+bool heaters_enabled = false;
+
+TOGGLE(heaters_enabled, SetHeaters, "Heaters: ", doNothing, noEvent, noStyle,
+  VALUE("Enabled",true,doNothing,noEvent),
+  VALUE("Disabled",false,doNothing,noEvent)
+);
+
+const char* constMEM hexDigit MEMMODE="0123456789ABCDEF";
+const char* constMEM hexNr[] MEMMODE={"0","x",hexDigit,hexDigit};
+char buf1[]="0x11";
+
+MENU(mainMenu,"Main menu",doNothing,noEvent,wrapStyle
+  ,FIELD(temperature, "Set:", "C", 0, 200, 10, 1, doNothing, noEvent, wrapStyle)
+  ,SUBMENU(SetHeaters)
+  ,EXIT("<Back")
+);
+
+// define menu colors --------------------------------------------------------
+//  {{disabled normal,disabled selected},{enabled normal,enabled selected, enabled editing}}
+//monochromatic color table
+const colorDef<uint16_t> colors[6] MEMMODE={
+  {{SH110X_BLACK,SH110X_WHITE},{SH110X_BLACK,SH110X_WHITE,SH110X_WHITE}},//bgColor
+  {{SH110X_WHITE,SH110X_BLACK},{SH110X_WHITE,SH110X_BLACK,SH110X_BLACK}},//fgColor
+  {{SH110X_WHITE,SH110X_BLACK},{SH110X_WHITE,SH110X_BLACK,SH110X_BLACK}},//valColor
+  {{SH110X_WHITE,SH110X_BLACK},{SH110X_WHITE,SH110X_BLACK,SH110X_BLACK}},//unitColor
+  {{SH110X_WHITE,SH110X_BLACK},{SH110X_BLACK,SH110X_BLACK,SH110X_BLACK}},//cursorColor
+  {{SH110X_WHITE,SH110X_BLACK},{SH110X_BLACK,SH110X_WHITE,SH110X_WHITE}},//titleColor
+};
+
+#define gfxWidth 128
+#define gfxHeight 64
+#define fontX 6
+//5
+#define fontY 9
+#define MAX_DEPTH 2
+
+serialIn serial(Serial);
+MENU_INPUTS(in,&keys,&serial);
+
+#define MAX_DEPTH 2
+#define textScale 1
+MENU_OUTPUTS(out,MAX_DEPTH
+  ,ADAGFX_OUT(gfx,colors,fontX,fontY,{0,0,gfxWidth/fontX,gfxHeight/fontY})
+  ,SERIAL_OUT(Serial)
+);
+
+NAVROOT(nav,mainMenu,MAX_DEPTH,in,out);
+
+result alert(menuOut& o,idleEvent e) {
+  if (e==idling) {
+    o.setCursor(0,0);
+    o.print(F("alert test"));
+    o.setCursor(0,1);
+    o.print(F("press [select]"));
+    o.setCursor(0,2);
+    o.print(F("to continue..."));
   }
-  output_data.close();  // Finish writing
+  return proceed;
 }
 
-auto ReadHeaterSettings(const HeaterSettings::HeaterSettings* settings) -> void {
-  SERIALOUT.printf("\nSet point: %i", settings->set_point());               // Print the setpoint
-  SERIALOUT.printf("\nLights: %s", settings->lights() ? "True" : "False");  // Print the boolean lights
-  // SERIALOUT.printf("\nLights: %i", settings->lights());  // Print the boolean lights
-  SERIALOUT.printf("\nFloat: %f", settings->p_value());  // Print the boolean lights
+result doAlert(eventMask e, prompt &item) {
+  nav.idleOn(alert);
+  return proceed;
 }
 
-auto PrintRawBytes(const uint8_t* buffer) -> void {
-  for (size_t offset = 0; offset < 80; ++offset) {  // Go through each byte of the builder's buffer that has relevent data
-    auto current_value = *(buffer + offset);        // Offset the point appropriately to access the next byte
-    SERIALOUT.print(current_value, HEX);            // Write the byte to the file
-    SERIALOUT.print(' ');
-  }
-  SERIALOUT.print('\n');
+//when menu is suspended
+result idle(menuOut& o,idleEvent e) {
+  o.setCursor(0,0);
+  o.print(F("suspended..."));
+  o.setCursor(0,1);
+  o.print(F("press [select]"));
+  o.setCursor(0,2);
+  o.print(F("to continue"));
+  return proceed;
 }
 
 void setup() {
-  // SERIALOUT.begin(9600);
-  // while (!SERIALOUT)
-  //   ;
-  // if (!sd_card.begin(sd_cs_pin, SD_SCK_MHZ(50)))  // Start the SD card and increase communication speed to 50MHz (decrease if errors)
-  //   SERIALOUT.print("Error setting up card\n");
+  pinMode(LEDPIN,OUTPUT);
+  Serial.begin(9600);
+  // while(!Serial);
+  Serial.println(F("menu 4.x test"));
+  Serial.flush();
+  nav.idleTask=idle;//point a function to be used when menu is suspended
 
-  // flatbuffers::FlatBufferBuilder builder(40);
-  // builder.ForceDefaults(true);
-  // auto output_buffer = HeaterSettings::CreateHeaterSettings(builder, false, 20, 80.225);  // Create a new heater settings with the builder
-  // builder.Finish(output_buffer);
+  keys.begin();
 
-  // ofstream output_data("HeaterSettings.bin");                       // Open or create a new file
-  // if (output_data.is_open()) {                                      // Check that it is open
-  //   for (size_t offset = 0; offset < 80; ++offset) {                // Go through each byte of the builder's buffer that has relevent data
-  //     auto current_value = *(builder.GetBufferPointer() + offset);  // Offset the point appropriately to access the next byte
-  //     output_data << current_value;                                 // Write the byte to the file
-  //   }
-  // }
-  // output_data.close();  // Finish writing
-
-  // ifstream input_buffer("HeaterSettings.bin");                                             // Open the created file
-  // input_buffer.getline(reinterpret_cast<char*>(sd_buffer.data()), sd_buffer.size(), EOF);  // Pull the Flatbuffer raw data from the file
-  // auto input_data = HeaterSettings::GetHeaterSettings(sd_buffer.data());       // Take the raw data and make it accessible as heater setting data
-  // ReadHeaterSettings(input_data);
-  // SERIALOUT.print("\n1: ");
-  // PrintRawBytes(sd_buffer.data());
-
-  // std::array<uint8_t, buffer_size> new_sd_buffer = {0};
-  // ifstream input_buffer_2("HeaterSettings.bin");                                             // Open the created file
-  // input_buffer_2.getline(reinterpret_cast<char*>(new_sd_buffer.data()), new_sd_buffer.size(), EOF);  // Pull the Flatbuffer raw data from the file
-  // auto input_data_2 = HeaterSettings::GetMutableHeaterSettings(new_sd_buffer.data());       // Take the raw data and make it accessible as heater setting data
-  // ReadHeaterSettings(input_data_2);
-  // PrintRawBytes(new_sd_buffer.data());
-  // input_data_2->mutate_lights(true);
-  // input_data_2->mutate_set_point(128);
-  // input_data_2->mutate_p_value(32.3684);
-
-  // ofstream output_data_2("HeaterSettings.bin");                       // Open or create a new file
-  // if (output_data_2.is_open()) {                                      // Check that it is open
-  //   for (size_t offset = 0; offset < 80; ++offset) {                // Go through each byte of the builder's buffer that has relevent data
-  //     auto current_value = *(new_sd_buffer.data() + offset);  // Offset the point appropriately to access the next byte
-  //     output_data_2 << current_value;                                 // Write the byte to the file
-  //   }
-  // }
-  // output_data_2.close();  // Finish writing
-
-  // std::array<uint8_t, buffer_size> sd_buffer_3 = {0};
-  // ifstream input_buffer_3("HeaterSettings.bin");                                             // Open the created file
-  // input_buffer_3.getline(reinterpret_cast<char*>(sd_buffer_3.data()), sd_buffer_3.size(), EOF);  // Pull the Flatbuffer raw data from the file
-  // auto input_data_3 = HeaterSettings::GetHeaterSettings(sd_buffer_3.data());       // Take the raw data and make it accessible as heater setting data
-  // ReadHeaterSettings(input_data_3);
-  // PrintRawBytes(sd_buffer.data());
-
-  // DisplayCheck(oled);
-  // NeopixelCheck(pixels);
-
-  pinMode(LED_BUILTIN, OUTPUT);
-  pinMode(F0_G3, INPUT);
-  pinMode(F0_G4, INPUT);
-  pinMode(F0_G5, INPUT);
-  pinMode(F0_G6, INPUT);
+  SPI.begin();
+  gfx.begin();
+  gfx.clearDisplay();
+  gfx.println(F("Menu 4.x test on GFX"));
+  gfx.setContrast(50);
+  gfx.display(); // show splashscreen
+  delay(2000);
+  gfx.clearDisplay();
+  gfx.display(); // show splashscreen
+  // gfx.drawRect(0, 0, 84, 48, 1);
 }
 
 void loop() {
-  while (!SERIALOUT);
-  SERIALOUT.print("G3: ");
-  SERIALOUT.print(digitalRead(F0_G3));
-  SERIALOUT.print(" G4: ");
-  SERIALOUT.print(digitalRead(F0_G4));
-  SERIALOUT.print(" G5: ");
-  SERIALOUT.print(digitalRead(F0_G5));
-  SERIALOUT.print(" G6: ");
-  SERIALOUT.print(digitalRead(F0_G6));
-  SERIALOUT.print("\r");
-  delay(50);
+  //or on a need to draw basis:
+  nav.doInput();
+  if (nav.changed(0)) {//only draw if changed
+    nav.doOutput();
+    gfx.display();
+  }
+
+  delay(100);//simulate a delay when other tasks are done
 }
