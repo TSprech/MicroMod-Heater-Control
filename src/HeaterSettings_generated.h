@@ -15,25 +15,33 @@ struct HeaterSettings FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
   typedef HeaterSettingsBuilder Builder;
   struct Traits;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
-    VT_SET_POINT = 4,
-    VT_LIGHTS = 6
+    VT_LIGHTS = 4,
+    VT_SET_POINT = 6,
+    VT_P_VALUE = 8
   };
-  uint8_t set_point() const {
-    return GetField<uint8_t>(VT_SET_POINT, 0);
-  }
-  bool mutate_set_point(uint8_t _set_point = 0) {
-    return SetField<uint8_t>(VT_SET_POINT, _set_point, 0);
-  }
   bool lights() const {
     return GetField<uint8_t>(VT_LIGHTS, 0) != 0;
   }
   bool mutate_lights(bool _lights = 0) {
     return SetField<uint8_t>(VT_LIGHTS, static_cast<uint8_t>(_lights), 0);
   }
+  uint8_t set_point() const {
+    return GetField<uint8_t>(VT_SET_POINT, 10);
+  }
+  bool mutate_set_point(uint8_t _set_point = 10) {
+    return SetField<uint8_t>(VT_SET_POINT, _set_point, 10);
+  }
+  float p_value() const {
+    return GetField<float>(VT_P_VALUE, 2.0375f);
+  }
+  bool mutate_p_value(float _p_value = 2.0375f) {
+    return SetField<float>(VT_P_VALUE, _p_value, 2.0375f);
+  }
   bool Verify(flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
-           VerifyField<uint8_t>(verifier, VT_SET_POINT) &&
            VerifyField<uint8_t>(verifier, VT_LIGHTS) &&
+           VerifyField<uint8_t>(verifier, VT_SET_POINT) &&
+           VerifyField<float>(verifier, VT_P_VALUE) &&
            verifier.EndTable();
   }
 };
@@ -42,11 +50,14 @@ struct HeaterSettingsBuilder {
   typedef HeaterSettings Table;
   flatbuffers::FlatBufferBuilder &fbb_;
   flatbuffers::uoffset_t start_;
-  void add_set_point(uint8_t set_point) {
-    fbb_.AddElement<uint8_t>(HeaterSettings::VT_SET_POINT, set_point, 0);
-  }
   void add_lights(bool lights) {
     fbb_.AddElement<uint8_t>(HeaterSettings::VT_LIGHTS, static_cast<uint8_t>(lights), 0);
+  }
+  void add_set_point(uint8_t set_point) {
+    fbb_.AddElement<uint8_t>(HeaterSettings::VT_SET_POINT, set_point, 10);
+  }
+  void add_p_value(float p_value) {
+    fbb_.AddElement<float>(HeaterSettings::VT_P_VALUE, p_value, 2.0375f);
   }
   explicit HeaterSettingsBuilder(flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
@@ -61,15 +72,17 @@ struct HeaterSettingsBuilder {
 
 inline flatbuffers::Offset<HeaterSettings> CreateHeaterSettings(
     flatbuffers::FlatBufferBuilder &_fbb,
-    uint8_t set_point = 0,
-    bool lights = false) {
+    bool lights = false,
+    uint8_t set_point = 10,
+    float p_value = 2.0375f) {
   HeaterSettingsBuilder builder_(_fbb);
-  builder_.add_lights(lights);
+  builder_.add_p_value(p_value);
   builder_.add_set_point(set_point);
+  builder_.add_lights(lights);
   return builder_.Finish();
 }
 
-struct Traits {
+struct HeaterSettings::Traits {
   using type = HeaterSettings;
   static auto constexpr Create = CreateHeaterSettings;
 };
